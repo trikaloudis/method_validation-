@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import numpy as np
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -35,8 +36,13 @@ def calculate_summary_stats(df, compound, group_by_cols):
     # Calculate derived statistics, handling potential division by zero
     summary['%RSD'] = 100 * (summary['SD'] / summary['Mean']).replace([float('inf'), -float('inf')], None)
     summary['Mean % Recovery'] = 100 * (summary['Mean'] / summary['Level']).replace([float('inf'), -float('inf')], None)
-    # --- New Calculation for Expanded Uncertainty ---
-    summary['Uexp (k=2)'] = 2 * summary['SD']
+    
+    # --- NORDTEST Expanded Uncertainty Calculation ---
+    # Uexp = k * sqrt(SD^2 + bias^2), where bias = Mean - Level and k=2
+    bias_sq = (summary['Mean'] - summary['Level'])**2
+    sd_sq = summary['SD']**2
+    summary['Uexp (k=2)'] = 2 * np.sqrt(sd_sq + bias_sq)
+
 
     return summary
 
@@ -294,8 +300,9 @@ if uploaded_file is not None:
                     with st.expander("View Uncertainty Details", expanded=True):
                         st.markdown("""
                         The Expanded Uncertainty (`Uexp`) provides an interval where the true value is believed to lie with a high level of confidence (approximately 95%).
-                        - It is estimated using a coverage factor of **k=2**.
-                        - **Calculation**: `Uexp = 2 * Standard Deviation (SD)`
+                        - This calculation is based on the **NORDTEST TR 537** handbook methodology.
+                        - It combines uncertainty from random effects (precision) and systematic effects (bias).
+                        - **Calculation**: `Uexp = 2 * sqrt(SD² + Bias²)`, where `Bias = Mean - Level`.
                         """)
                         
                         # Create and display the dedicated uncertainty report
@@ -359,6 +366,7 @@ if uploaded_file is not None:
 
 else:
     st.info("Awaiting for an Excel file to be uploaded.")
+
 
 
 
