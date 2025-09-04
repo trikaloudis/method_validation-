@@ -4,7 +4,7 @@ import plotly.express as px
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Analytical Method Validation Analyzer",
+    page_title="AquOmixLab - Method Validation",
     page_icon="🔬",
     layout="wide"
 )
@@ -106,9 +106,33 @@ if uploaded_file is not None:
 
         # --- Data Validation ---
         required_cols = ["Index", "Date", "Analyst", "Sample", "Units", "Level", "Notes"]
-        if not all(col in df.columns for col in required_cols):
-            st.error(f"Error: The uploaded file is missing one or more required columns. Please ensure the following columns exist: {', '.join(required_cols)}")
+        
+        # --- Normalization and Validation Logic ---
+        # Create a mapping from the standardized lowercase name to the original name in the file
+        # This handles both whitespace and case-insensitivity
+        cols_in_file = {c.strip().lower(): c for c in df.columns}
+        
+        missing_cols = []
+        # This will hold the mapping from the original file's column name to our standard name
+        # e.g., {'  iNdEx  ': 'Index', 'LEVEL': 'Level'}
+        rename_map = {}
+
+        for req_col in required_cols:
+            if req_col.lower() in cols_in_file:
+                # Get the original column name from the file (e.g., "  iNdEx  ")
+                original_col_name = cols_in_file[req_col.lower()]
+                # Map it to our desired standard name (e.g., "Index")
+                rename_map[original_col_name] = req_col
+            else:
+                missing_cols.append(req_col)
+
+        if missing_cols:
+            st.error(f"Error: The uploaded file is missing one or more required columns. Please ensure the following columns exist: **{', '.join(missing_cols)}**")
+            st.info(f"We detected the following columns in your file: {', '.join(df.columns)}")
         else:
+            # If all columns are found, rename them to the standard casing for consistency
+            df.rename(columns=rename_map, inplace=True)
+
             # Identify compound columns (all columns after "Notes")
             notes_index = df.columns.get_loc("Notes")
             compound_columns = df.columns[notes_index + 1:].tolist()
@@ -179,3 +203,4 @@ if uploaded_file is not None:
 
 else:
     st.info("Awaiting for an Excel file to be uploaded.")
+
