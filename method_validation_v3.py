@@ -37,17 +37,23 @@ class PDF(FPDF):
             col_widths = [30] * len(df.columns)
 
         for i, col in enumerate(df.columns):
-            self.cell(col_widths[i], 7, str(col), 1, 0, 'C')
+            # Sanitize text for PDF font compatibility
+            clean_col = str(col).replace('μ', 'u')
+            self.cell(col_widths[i], 7, clean_col, 1, 0, 'C')
         self.ln()
         # Data
         self.set_font('Arial', '', 9)
         for index, row in df.iterrows():
             for i, item in enumerate(row):
-                self.cell(col_widths[i], 6, str(item), 1, 0, 'L')
+                # Sanitize text for PDF font compatibility
+                clean_item = str(item).replace('μ', 'u')
+                self.cell(col_widths[i], 6, clean_item, 1, 0, 'L')
             self.ln()
         if notes:
             self.set_font('Arial', 'I', 8)
-            self.multi_cell(0, 5, notes)
+            # Sanitize text for PDF font compatibility
+            clean_notes = str(notes).replace('μ', 'u')
+            self.multi_cell(0, 5, clean_notes)
 
 
 def generate_pdf_report(info_df, summary_df, criteria_df, validation_df, figures):
@@ -63,9 +69,11 @@ def generate_pdf_report(info_df, summary_df, criteria_df, validation_df, figures
         pdf.set_font('Arial', '', 10)
         for index, row in info_df.iterrows():
             pdf.set_font('Arial', 'B', 10)
-            pdf.cell(80, 6, str(row[0]), 0, 0, 'L')
+            # Sanitize text for PDF font compatibility
+            pdf.cell(80, 6, str(row[0]).replace('μ', 'u'), 0, 0, 'L')
             pdf.set_font('Arial', '', 10)
-            pdf.cell(0, 6, str(row[1]), 0, 1, 'L')
+            # Sanitize text for PDF font compatibility
+            pdf.cell(0, 6, str(row[1]).replace('μ', 'u'), 0, 1, 'L')
         pdf.ln(10)
 
     # --- 2. Summary Statistics ---
@@ -352,6 +360,7 @@ else:
 
 # --- Sidebar Footer ---
 st.sidebar.markdown("---")
-st.sidebar.image("AquOmixLogo.png", use_column_width=True)
+st.sidebar.image("AquOmixLogo.png", use_container_width=True)
 st.sidebar.markdown("[https://www.aquomixlab.com](https://www.aquomixlab.com)")
+
 
