@@ -42,6 +42,8 @@ def calculate_summary_stats(df, compound, group_by_cols):
     bias_sq = (summary['Mean'] - summary['Level'])**2
     sd_sq = summary['SD']**2
     summary['Uexp (k=2)'] = 2 * np.sqrt(sd_sq + bias_sq)
+    # --- Add %Uexp calculation ---
+    summary['%Uexp (k=2)'] = (100 * (summary['Uexp (k=2)'] / summary['Level'])).replace([float('inf'), -float('inf')], None)
 
 
     return summary
@@ -103,6 +105,7 @@ def generate_validation_report(summary_df, criteria):
     rsd_max = criteria.get('%RSD max', None)
     rec_max = criteria.get('Mean % Recovery max', None)
     rec_min = criteria.get('Mean % Recovery min', None)
+    uexp_max = criteria.get('%Uexp (k=2)', None) # New criterion
 
     # --- Perform checks and generate PASS/FAIL status for each criterion ---
     
@@ -133,6 +136,15 @@ def generate_validation_report(summary_df, criteria):
         )
     else:
         report_df['Recovery Min Check'] = "N/A"
+
+    # 4. %Uexp Check (New)
+    if uexp_max is not None:
+        report_df['%Uexp Check'] = summary_df.apply(
+            lambda row: "PASS" if pd.notna(row['%Uexp (k=2)']) and row['%Uexp (k=2)'] <= uexp_max else "FAIL",
+            axis=1
+        )
+    else:
+        report_df['%Uexp Check'] = "N/A"
 
     # --- Determine the overall status ---
     check_cols = [col for col in report_df.columns if 'Check' in col]
@@ -292,7 +304,8 @@ if uploaded_file is not None:
                                 'N': '{}',
                                 '%RSD': '{:.2f}%',
                                 'Mean % Recovery': '{:.2f}%',
-                                'Uexp (k=2)': '{:.3f}'
+                                'Uexp (k=2)': '{:.3f}',
+                                '%Uexp (k=2)': '{:.2f}%'
                             }), use_container_width=True)
 
                     # --- 2. Expanded Uncertainty Report ---
@@ -303,13 +316,17 @@ if uploaded_file is not None:
                         - This calculation is based on the **NORDTEST TR 537** handbook methodology.
                         - It combines uncertainty from random effects (precision) and systematic effects (bias).
                         - **Calculation**: `Uexp = 2 * sqrt(SD² + Bias²)`, where `Bias = Mean - Level`.
+                        - **%Uexp** expresses this uncertainty as a percentage relative to the concentration level.
                         """)
                         
                         # Create and display the dedicated uncertainty report
-                        uncertainty_report_df = final_summary_df[['Compound', 'Level', 'Uexp (k=2)']]
+                        uncertainty_report_df = final_summary_df[['Compound', 'Level', 'Uexp (k=2)', '%Uexp (k=2)']]
                         
                         st.dataframe(
-                            uncertainty_report_df.style.format({'Uexp (k=2)': '{:.3f}'}),
+                            uncertainty_report_df.style.format({
+                                'Uexp (k=2)': '{:.3f}',
+                                '%Uexp (k=2)': '{:.2f}%'
+                                }),
                             use_container_width=True
                         )
 
@@ -366,6 +383,8 @@ if uploaded_file is not None:
 
 else:
     st.info("Awaiting for an Excel file to be uploaded.")
+
+
 
 
 
