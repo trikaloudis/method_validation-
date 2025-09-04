@@ -84,6 +84,74 @@ def create_level_specific_boxplot(df_level, compounds, level_value):
     fig.update_layout(boxgroupgap=0.5, boxgap=0.3)
     return fig
 
+def generate_validation_report(summary_df, criteria):
+    """
+    Compares summary statistics against validation criteria and generates a PASS/FAIL report.
+    """
+    # Create the base of the report from the summary
+    report_df = summary_df[['Compound', 'Level']].copy()
+    
+    # --- Get criteria values from the dictionary, defaulting to None if not found ---
+    rsd_max = criteria.get('%RSD max', None)
+    rec_max = criteria.get('Mean % Recovery max', None)
+    rec_min = criteria.get('Mean % Recovery min', None)
+
+    # --- Perform checks and generate PASS/FAIL status for each criterion ---
+    
+    # 1. %RSD Check
+    if rsd_max is not None:
+        # Compare each row's %RSD against the criterion
+        report_df['RSD Check'] = summary_df.apply(
+            lambda row: "PASS" if pd.notna(row['%RSD']) and row['%RSD'] <= rsd_max else "FAIL",
+            axis=1
+        )
+    else:
+        report_df['RSD Check'] = "N/A"
+
+    # 2. Mean % Recovery Max Check
+    if rec_max is not None:
+        report_df['Recovery Max Check'] = summary_df.apply(
+            lambda row: "PASS" if pd.notna(row['Mean % Recovery']) and row['Mean % Recovery'] <= rec_max else "FAIL",
+            axis=1
+        )
+    else:
+        report_df['Recovery Max Check'] = "N/A"
+
+    # 3. Mean % Recovery Min Check
+    if rec_min is not None:
+        report_df['Recovery Min Check'] = summary_df.apply(
+            lambda row: "PASS" if pd.notna(row['Mean % Recovery']) and row['Mean % Recovery'] >= rec_min else "FAIL",
+            axis=1
+        )
+    else:
+        report_df['Recovery Min Check'] = "N/A"
+
+    # --- Determine the overall status ---
+    check_cols = [col for col in report_df.columns if 'Check' in col]
+    
+    def get_overall_status(row):
+        # If any check is marked as "FAIL", the overall status is "FAIL"
+        if "FAIL" in row[check_cols].values:
+            return "FAIL"
+        # If no checks failed, the overall status is "PASS"
+        return "PASS"
+
+    report_df['Overall Status'] = report_df.apply(get_overall_status, axis=1)
+
+    return report_df
+
+def style_report(val):
+    """
+    Applies color to PASS/FAIL/N/A cells for better visualization.
+    """
+    if val == "PASS":
+        color = 'green'
+    elif val == "FAIL":
+        color = 'red'
+    else: # For "N/A"
+        color = 'grey'
+    return f'color: {color}; font-weight: bold;'
+
 
 # --- Main Application ---
 st.title("🔬 Analytical Method Validation Data Analyzer")
@@ -110,8 +178,20 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
     try:
-        # Read the specific sheet from the uploaded excel file
+        # Read the main data and criteria sheets from the uploaded excel file
         df = pd.read_excel(uploaded_file, sheet_name="Validation data")
+        
+        criteria_dict = None
+        try:
+            criteria_df = pd.read_excel(uploaded_file, sheet_name="Criteria", header=None)
+            # Convert the two-column criteria sheet into a dictionary
+            # It takes column 0 as keys and column 1 as values
+            criteria_df[0] = criteria_df[0].str.strip() # Clean up whitespace
+            criteria_dict = criteria_df.set_index(0)[1].to_dict()
+            st.sidebar.success("Successfully loaded 'Criteria' sheet.")
+        except Exception:
+            st.sidebar.warning("Optional 'Criteria' sheet not found. PASS/FAIL report will not be generated.")
+
 
         # --- Data Validation ---
         required_cols = ["Index", "Date", "Analyst", "Sample", "Units", "Level", "Notes"]
@@ -206,7 +286,20 @@ if uploaded_file is not None:
                                 'Mean % Recovery': '{:.2f}%'
                             }), use_container_width=True)
 
-                    # --- 2. Create separate boxplots for each level ---
+                    # --- 2. Validation Report (if criteria are available) ---
+                    if criteria_dict:
+                        st.header("Validation Report")
+                        validation_report = generate_validation_report(final_summary_df, criteria_dict)
+                        
+                        # Apply styling to the report for better readability
+                        report_subset_cols = [col for col in validation_report.columns if 'Check' in col or 'Status' in col]
+                        st.dataframe(
+                            validation_report.style.apply(lambda col: col.map(style_report), subset=report_subset_cols),
+                            use_container_width=True
+                        )
+
+
+                    # --- 3. Create separate boxplots for each level ---
                     st.header("Comparative Boxplots by Level")
 
                     # Create a clean copy for plotting to avoid data type issues
