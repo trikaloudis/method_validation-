@@ -360,7 +360,8 @@ else:
 
 # --- Sidebar Footer ---
 st.sidebar.markdown("---")
-st.sidebar.image("AquOmixLogo.png", use_container_width=True)
+st.sidebar.image("https://github.com/trikaloudis/method_validation-/blob/main/Aquomixlab%20Logo%20v2.png", use_container_width=True)
 st.sidebar.markdown("[https://www.aquomixlab.com](https://www.aquomixlab.com)")
+
 
 
