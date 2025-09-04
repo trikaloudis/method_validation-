@@ -4,7 +4,7 @@ import plotly.express as px
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="AquOmixLab - Method Validation",
+    page_title="Analytical Method Validation Analyzer",
     page_icon="🔬",
     layout="wide"
 )
@@ -38,38 +38,49 @@ def calculate_summary_stats(df, compound, group_by_cols):
 
     return summary
 
-def create_boxplot(df, compound):
+def create_merged_boxplot(df, compounds):
     """
-    Creates and returns a Plotly boxplot for % Recovery.
+    Creates a single Plotly boxplot comparing all selected compounds across levels.
     """
-    # Create a copy to avoid modifying the original dataframe
-    plot_df = df.copy()
+    # --- 1. Reshape data from wide to long format ---
+    # This is essential for plotting multiple compounds with Plotly Express
+    id_vars = ['Level', 'Analyst', 'Date', 'Sample']
+    # Ensure id_vars exist before using them
+    id_vars_present = [col for col in id_vars if col in df.columns]
+    
+    long_df = df.melt(
+        id_vars=id_vars_present,
+        value_vars=compounds,
+        var_name='Compound',
+        value_name='Measurement'
+    )
 
-    # Ensure data types are correct for calculation and plotting
-    plot_df[compound] = pd.to_numeric(plot_df[compound], errors='coerce')
-    plot_df['Level'] = pd.to_numeric(plot_df['Level'], errors='coerce')
-    plot_df = plot_df.dropna(subset=[compound, 'Level'])
+    # --- 2. Data Cleaning and Calculation ---
+    long_df['Measurement'] = pd.to_numeric(long_df['Measurement'], errors='coerce')
+    long_df['Level'] = pd.to_numeric(long_df['Level'], errors='coerce')
+    long_df = long_df.dropna(subset=['Measurement', 'Level'])
 
     # Calculate % Recovery for each individual data point
     # Handle division by zero
-    plot_df['% Recovery'] = 100 * (plot_df[compound] / plot_df['Level']).replace([float('inf'), -float('inf')], None)
-    plot_df = plot_df.dropna(subset=['% Recovery'])
-
-    if plot_df.empty:
+    long_df['% Recovery'] = 100 * (long_df['Measurement'] / long_df['Level']).replace([float('inf'), -float('inf')], None)
+    long_df = long_df.dropna(subset=['% Recovery'])
+    
+    if long_df.empty:
         return None # Return None if no data to plot
 
-    # Create the box plot
+    # --- 3. Create the merged box plot ---
     fig = px.box(
-        plot_df,
+        long_df,
         x='Level',
         y='% Recovery',
-        title=f'% Recovery Distribution for {compound}',
+        color='Compound',  # This creates separate, grouped boxplots for each compound
+        title='% Recovery Distribution for All Compounds',
         labels={
             'Level': 'Level (True Concentration)',
             '% Recovery': '% Recovery'
         },
-        points="all", # Show all underlying data points
-        hover_data=['Analyst', 'Date', 'Sample'] # Add more context on hover
+        points="all",
+        hover_data=['Analyst', 'Date', 'Sample']
     )
     # Ensure 'Level' is treated as a discrete category for distinct boxes
     fig.update_layout(xaxis_type='category')
@@ -160,42 +171,50 @@ if uploaded_file is not None:
                 if not selected_compounds:
                     st.info("Please select at least one compound from the sidebar to start the analysis.")
                 else:
-                    for compound in selected_compounds:
-                        st.markdown("---")
-                        st.header(f"Analysis for: {compound}")
+                    st.markdown("---")
+                    st.header("Combined Analysis")
 
-                        # --- Summary Statistics ---
-                        with st.expander("View Summary Statistics", expanded=True):
-                            group_by_cols = ['Level']
-                            if grouping_option != "None":
-                                group_by_cols.append(grouping_option)
+                    # --- 1. Consolidated Summary Statistics ---
+                    with st.expander("View Summary Statistics for All Selected Compounds", expanded=True):
+                        all_summaries = []
+                        group_by_cols = ['Level']
+                        if grouping_option != "None":
+                            group_by_cols.append(grouping_option)
 
+                        for compound in selected_compounds:
                             summary_df = calculate_summary_stats(df, compound, group_by_cols)
-
-                            if summary_df.empty:
-                                st.warning(f"No valid numerical data to calculate statistics for '{compound}'.")
-                            else:
-                                st.write(f"Statistics for **{compound}** grouped by **{' and '.join(group_by_cols)}**:")
-                                # Display dataframe with styled formatting
-                                st.dataframe(summary_df.style.format({
-                                    'Mean': '{:.3f}',
-                                    'SD': '{:.3f}',
-                                    'Min': '{:.3f}',
-                                    'Max': '{:.3f}',
-                                    'N': '{}',
-                                    '%RSD': '{:.2f}%',
-                                    'Mean % Recovery': '{:.2f}%'
-                                }), use_container_width=True)
-
-
-                        # --- Box Plot ---
-                        st.subheader(f"Boxplot of % Recovery for {compound}")
-                        fig = create_boxplot(df, compound)
-                        if fig:
-                            st.plotly_chart(fig, use_container_width=True)
+                            if not summary_df.empty:
+                                summary_df['Compound'] = compound
+                                all_summaries.append(summary_df)
+                        
+                        if not all_summaries:
+                            st.warning("No valid numerical data to calculate statistics for the selected compounds.")
                         else:
-                            st.warning(f"Could not generate boxplot for '{compound}' due to missing or invalid data.")
+                            # Combine all individual summaries into one DataFrame
+                            final_summary_df = pd.concat(all_summaries, ignore_index=True)
+                            
+                            # Reorder columns to have Compound first
+                            cols_order = ['Compound'] + [col for col in final_summary_df if col != 'Compound']
+                            final_summary_df = final_summary_df[cols_order]
 
+                            st.write(f"Statistics grouped by **{' and '.join(group_by_cols)}**:")
+                            st.dataframe(final_summary_df.style.format({
+                                'Mean': '{:.3f}',
+                                'SD': '{:.3f}',
+                                'Min': '{:.3f}',
+                                'Max': '{:.3f}',
+                                'N': '{}',
+                                '%RSD': '{:.2f}%',
+                                'Mean % Recovery': '{:.2f}%'
+                            }), use_container_width=True)
+
+                    # --- 2. Merged Box Plot ---
+                    st.subheader("Comparative Boxplot of % Recovery")
+                    merged_fig = create_merged_boxplot(df, selected_compounds)
+                    if merged_fig:
+                        st.plotly_chart(merged_fig, use_container_width=True)
+                    else:
+                        st.warning("Could not generate the merged boxplot due to missing or invalid data for the selected compounds.")
 
     except Exception as e:
         st.error(f"An error occurred while processing the file: {e}")
