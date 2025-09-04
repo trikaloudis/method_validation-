@@ -38,17 +38,16 @@ def calculate_summary_stats(df, compound, group_by_cols):
 
     return summary
 
-def create_merged_boxplot(df, compounds):
+def create_level_specific_boxplot(df_level, compounds, level_value):
     """
-    Creates a single Plotly boxplot comparing all selected compounds across levels.
+    Creates a boxplot for a specific level, comparing all selected compounds.
+    The X-axis shows the compounds.
     """
     # --- 1. Reshape data from wide to long format ---
-    # This is essential for plotting multiple compounds with Plotly Express
     id_vars = ['Level', 'Analyst', 'Date', 'Sample']
-    # Ensure id_vars exist before using them
-    id_vars_present = [col for col in id_vars if col in df.columns]
+    id_vars_present = [col for col in id_vars if col in df_level.columns]
     
-    long_df = df.melt(
+    long_df = df_level.melt(
         id_vars=id_vars_present,
         value_vars=compounds,
         var_name='Compound',
@@ -61,29 +60,28 @@ def create_merged_boxplot(df, compounds):
     long_df = long_df.dropna(subset=['Measurement', 'Level'])
 
     # Calculate % Recovery for each individual data point
-    # Handle division by zero
     long_df['% Recovery'] = 100 * (long_df['Measurement'] / long_df['Level']).replace([float('inf'), -float('inf')], None)
     long_df = long_df.dropna(subset=['% Recovery'])
     
     if long_df.empty:
         return None # Return None if no data to plot
 
-    # --- 3. Create the merged box plot ---
+    # --- 3. Create the box plot for the specific level ---
     fig = px.box(
         long_df,
-        x='Level',
+        x='Compound',  # X-axis is now Compound
         y='% Recovery',
-        color='Compound',  # This creates separate, grouped boxplots for each compound
-        title='% Recovery Distribution for All Compounds',
+        color='Compound', # Assigns a unique color to each compound's boxplot
+        title=f'% Recovery Distribution at Level {level_value}',
         labels={
-            'Level': 'Level (True Concentration)',
+            'Compound': 'Compound', # Label for the X-axis
             '% Recovery': '% Recovery'
         },
         points="all",
         hover_data=['Analyst', 'Date', 'Sample']
     )
-    # Ensure 'Level' is treated as a discrete category for distinct boxes
-    fig.update_layout(xaxis_type='category')
+    # Add space between the boxplots for better readability
+    fig.update_layout(boxgroupgap=0.5, boxgap=0.3)
     return fig
 
 
@@ -208,13 +206,39 @@ if uploaded_file is not None:
                                 'Mean % Recovery': '{:.2f}%'
                             }), use_container_width=True)
 
-                    # --- 2. Merged Box Plot ---
-                    st.subheader("Comparative Boxplot of % Recovery")
-                    merged_fig = create_merged_boxplot(df, selected_compounds)
-                    if merged_fig:
-                        st.plotly_chart(merged_fig, use_container_width=True)
+                    # --- 2. Create separate boxplots for each level ---
+                    st.header("Comparative Boxplots by Level")
+
+                    # Create a clean copy for plotting to avoid data type issues
+                    plot_df = df.copy()
+                    # Ensure compound and Level columns are numeric
+                    for compound in selected_compounds:
+                        plot_df[compound] = pd.to_numeric(plot_df[compound], errors='coerce')
+                    plot_df['Level'] = pd.to_numeric(plot_df['Level'], errors='coerce')
+                    plot_df.dropna(subset=['Level'], inplace=True)
+                    
+                    if plot_df.empty:
+                        st.warning("No data available to generate plots for the selected compounds.")
                     else:
-                        st.warning("Could not generate the merged boxplot due to missing or invalid data for the selected compounds.")
+                        # Get sorted unique levels to display plots in an orderly fashion
+                        unique_levels = sorted(plot_df['Level'].unique())
+
+                        if not unique_levels:
+                            st.warning("Could not find any valid numeric levels in the data.")
+                        else:
+                            # Loop through each level and create a separate plot
+                            for level in unique_levels:
+                                # Filter the dataframe for the current level
+                                df_for_level = plot_df[plot_df['Level'] == level]
+                                
+                                # Generate and display the plot
+                                level_fig = create_level_specific_boxplot(df_for_level, selected_compounds, level)
+                                
+                                if level_fig:
+                                    st.plotly_chart(level_fig, use_container_width=True)
+                                else:
+                                    st.warning(f"Could not generate a boxplot for Level {level}. There might be no valid data for the selected compounds at this level.")
+
 
     except Exception as e:
         st.error(f"An error occurred while processing the file: {e}")
@@ -222,4 +246,6 @@ if uploaded_file is not None:
 
 else:
     st.info("Awaiting for an Excel file to be uploaded.")
+
+
 
