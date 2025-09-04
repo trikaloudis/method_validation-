@@ -105,7 +105,8 @@ def generate_validation_report(summary_df, criteria):
     rsd_max = criteria.get('%RSD max', None)
     rec_max = criteria.get('Mean % Recovery max', None)
     rec_min = criteria.get('Mean % Recovery min', None)
-    uexp_max = criteria.get('%Uexp (k=2)', None) # New criterion
+    # CORRECTED: The key should be descriptive and consistent with the others.
+    uexp_max = criteria.get('%Uexp (k=2) max', None)
 
     # --- Perform checks and generate PASS/FAIL status for each criterion ---
     
@@ -137,7 +138,7 @@ def generate_validation_report(summary_df, criteria):
     else:
         report_df['Recovery Min Check'] = "N/A"
 
-    # 4. %Uexp Check (New)
+    # 4. %Uexp Check (Corrected logic)
     if uexp_max is not None:
         report_df['%Uexp Check'] = summary_df.apply(
             lambda row: "PASS" if pd.notna(row['%Uexp (k=2)']) and row['%Uexp (k=2)'] <= uexp_max else "FAIL",
@@ -383,6 +384,7 @@ if uploaded_file is not None:
 
 else:
     st.info("Awaiting for an Excel file to be uploaded.")
+
 
 
 
