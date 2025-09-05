@@ -101,9 +101,20 @@ def generate_pdf_report(info_df, summary_df, criteria_df, validation_df, figures
     if criteria_df is not None and not criteria_df.empty:
         pdf.set_font('Arial', 'B', 12)
         pdf.cell(0, 10, "Applied Validation Criteria", 0, 1, 'L')
-        criteria_widths = [60, 30]
-        pdf.dataframe_to_table(criteria_df, col_widths=criteria_widths)
+        
+        # Reset index to make the criterion name a column for the table function
+        criteria_df_for_pdf = criteria_df.reset_index()
+        
+        # Dynamic column widths for multi-compound criteria table
+        num_cols = len(criteria_df_for_pdf.columns)
+        # Total width of page is ~190. First column can be wider.
+        first_col_width = 60
+        other_col_width = (190 - first_col_width) / (num_cols - 1) if num_cols > 1 else 130
+        criteria_widths = [first_col_width] + [other_col_width] * (num_cols - 1)
+        
+        pdf.dataframe_to_table(criteria_df_for_pdf, col_widths=criteria_widths)
         pdf.ln(5)
+
 
     if validation_df is not None and not validation_df.empty:
         pdf.set_font('Arial', 'B', 12)
@@ -172,32 +183,32 @@ def create_level_specific_boxplot(df_level, compounds, level_value):
     fig.update_layout(boxgroupgap=0.5, boxgap=0.3)
     return fig
 
-def generate_validation_report(summary_df, criteria):
+def generate_validation_report(summary_df, criteria_dict):
     """
-    Compares summary statistics against validation criteria and generates a PASS/FAIL report.
+    Compares summary statistics against compound-specific validation criteria.
     """
     report_df = summary_df[['Compound', 'Level']].copy()
-    
-    rsd_max = criteria.get('%RSD max')
-    rec_max = criteria.get('Mean % Recovery max')
-    rec_min = a=criteria.get('Mean % Recovery min')
-    uexp_max = criteria.get('%Uexp (k=2) max')
 
-    if rsd_max is not None:
-        report_df['RSD Check'] = summary_df.apply(lambda row: "PASS" if pd.notna(row['%RSD']) and row['%RSD'] <= rsd_max else "FAIL", axis=1)
-    else: report_df['RSD Check'] = "N/A"
+    def check(row, criterion_key, value_col):
+        """Helper function to apply a single validation check."""
+        compound_criteria = criteria_dict.get(row['Compound'], {})
+        limit = compound_criteria.get(criterion_key)
+        value = row[value_col]
+        
+        if limit is None or pd.isna(limit):
+            return "N/A" # No criterion defined for this compound/check
+        if pd.isna(value):
+            return "FAIL" # A value should exist if a criterion does
 
-    if rec_max is not None:
-        report_df['Recovery Max Check'] = summary_df.apply(lambda row: "PASS" if pd.notna(row['Mean % Recovery']) and row['Mean % Recovery'] <= rec_max else "FAIL", axis=1)
-    else: report_df['Recovery Max Check'] = "N/A"
+        if 'min' in criterion_key.lower():
+            return "PASS" if value >= limit else "FAIL"
+        else: # Assumes a 'max' check
+            return "PASS" if value <= limit else "FAIL"
 
-    if rec_min is not None:
-        report_df['Recovery Min Check'] = summary_df.apply(lambda row: "PASS" if pd.notna(row['Mean % Recovery']) and row['Mean % Recovery'] >= rec_min else "FAIL", axis=1)
-    else: report_df['Recovery Min Check'] = "N/A"
-
-    if uexp_max is not None:
-        report_df['%Uexp Check'] = summary_df.apply(lambda row: "PASS" if pd.notna(row['%Uexp (k=2)']) and row['%Uexp (k=2)'] <= uexp_max else "FAIL", axis=1)
-    else: report_df['%Uexp Check'] = "N/A"
+    report_df['RSD Check'] = summary_df.apply(check, axis=1, criterion_key='%RSD max', value_col='%RSD')
+    report_df['Recovery Max Check'] = summary_df.apply(check, axis=1, criterion_key='Mean % Recovery max', value_col='Mean % Recovery')
+    report_df['Recovery Min Check'] = summary_df.apply(check, axis=1, criterion_key='Mean % Recovery min', value_col='Mean % Recovery')
+    report_df['%Uexp Check'] = summary_df.apply(check, axis=1, criterion_key='%Uexp (k=2) max', value_col='%Uexp (k=2)')
 
     check_cols = [col for col in report_df.columns if 'Check' in col]
     report_df['Overall Status'] = report_df.apply(lambda row: "FAIL" if "FAIL" in row[check_cols].values else "PASS", axis=1)
@@ -228,11 +239,15 @@ if uploaded_file is not None:
             info_df = pd.read_excel(uploaded_file, sheet_name="Info", header=None).dropna(how='all')
         except Exception: st.warning("Optional 'Info' sheet not found.")
         try:
-            criteria_df = pd.read_excel(uploaded_file, sheet_name="Criteria", header=None).dropna(how='all')
-            criteria_df[0] = criteria_df[0].str.strip()
-            criteria_dict = criteria_df.set_index(0)[1].to_dict()
+            # Read with the first row as header and first column as index for multi-compound criteria
+            criteria_df = pd.read_excel(uploaded_file, sheet_name="Criteria", header=0, index_col=0)
+            criteria_df = criteria_df.dropna(how='all')
+            criteria_df.index = criteria_df.index.str.strip()
+            # Convert to a dictionary of dictionaries: {'CompoundA': {'Criterion1': Value1, ...}}
+            criteria_dict = criteria_df.to_dict()
             st.sidebar.success("Successfully loaded 'Criteria' sheet.")
-        except Exception: st.sidebar.warning("Optional 'Criteria' sheet not found. Validation Evaluation will not be generated.")
+        except Exception: 
+            st.sidebar.warning("Optional 'Criteria' sheet not found or improperly formatted. Validation Evaluation will not be generated.")
 
         # --- Data Validation ---
         required_cols = ["Index", "Date", "Analyst", "Sample", "Units", "Level", "Notes"]
@@ -326,7 +341,8 @@ if uploaded_file is not None:
                         st.header("Validation Evaluation")
                         if criteria_df is not None:
                             st.subheader("Applied Validation Criteria")
-                            st.table(criteria_df.rename(columns={0: "Criterion", 1: "Value"}))
+                            # Display the full criteria table (compounds as columns)
+                            st.dataframe(criteria_df)
                         
                         validation_report = generate_validation_report(final_summary_df, criteria_dict)
                         report_subset_cols = [col for col in validation_report.columns if 'Check' in col or 'Status' in col]
@@ -360,8 +376,6 @@ else:
 
 # --- Sidebar Footer ---
 st.sidebar.markdown("---")
-st.sidebar.image("https://github.com/trikaloudis/method_validation-/blob/main/Aquomixlab%20Logo%20v2.png", use_container_width=True)
+st.sidebar.image("AquOmixLogo.png", use_container_width=True)
 st.sidebar.markdown("[https://www.aquomixlab.com](https://www.aquomixlab.com)")
-
-
 
