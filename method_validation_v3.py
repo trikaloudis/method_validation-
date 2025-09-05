@@ -69,16 +69,13 @@ def generate_pdf_report(info_df, summary_df, criteria_df, validation_df, figures
         pdf.set_font('Arial', '', 10)
         for index, row in info_df.iterrows():
             pdf.set_font('Arial', 'B', 10)
-            # Sanitize text for PDF font compatibility
             pdf.cell(80, 6, str(row[0]).replace('μ', 'u'), 0, 0, 'L')
             pdf.set_font('Arial', '', 10)
-            # Sanitize text for PDF font compatibility
             pdf.cell(0, 6, str(row[1]).replace('μ', 'u'), 0, 1, 'L')
         pdf.ln(10)
 
     # --- 2. Summary Statistics ---
     pdf.chapter_title('2. Summary Statistics')
-    # Custom column widths for the summary table
     summary_widths = [25, 15, 18, 18, 18, 18, 10, 18, 24, 24, 24]
     pdf.dataframe_to_table(summary_df, col_widths=summary_widths)
     pdf.ln(10)
@@ -87,9 +84,8 @@ def generate_pdf_report(info_df, summary_df, criteria_df, validation_df, figures
     pdf.add_page()
     pdf.chapter_title('3. Comparative Boxplots by Level')
     for i, fig in enumerate(figures):
-        if i > 0 and i % 2 == 0: # Add a new page after every 2 plots
+        if i > 0 and i % 2 == 0: 
             pdf.add_page()
-        
         img_bytes = fig.to_image(format="png", width=800, height=500, scale=1)
         img_stream = io.BytesIO(img_bytes)
         pdf.image(img_stream, x=10, w=190)
@@ -100,21 +96,23 @@ def generate_pdf_report(info_df, summary_df, criteria_df, validation_df, figures
     pdf.chapter_title('4. Validation Evaluation')
     if criteria_df is not None and not criteria_df.empty:
         pdf.set_font('Arial', 'B', 12)
-        # Total width of page is ~190. 
-        # First column (Criterion) can be wider. Second (Level) is narrow.
+        pdf.cell(0, 10, "Applied Validation Criteria", 0, 1, 'L')
+        
+        criteria_df_for_pdf = criteria_df.copy()
+        # Sanitize column names for PDF generation
+        criteria_df_for_pdf.columns = [str(col) for col in criteria_df_for_pdf.columns]
+        
+        num_cols = len(criteria_df_for_pdf.columns)
         if num_cols >= 2:
-            first_col_width = 50  # Criterion
-            second_col_width = 20 # Level
+            first_col_width = 50
+            second_col_width = 20
             other_col_width = (190 - first_col_width - second_col_width) / (num_cols - 2) if num_cols > 2 else 120
             criteria_widths = [first_col_width, second_col_width] + [other_col_width] * (num_cols - 2)
-        elif num_cols == 1:
-            criteria_widths = [190]
         else:
-            criteria_widths = []
+            criteria_widths = [190]
         
-        pdf.dataframe_to_table(criteria_df, col_widths=criteria_widths)
+        pdf.dataframe_to_table(criteria_df_for_pdf, col_widths=criteria_widths)
         pdf.ln(5)
-
 
     if validation_df is not None and not validation_df.empty:
         pdf.set_font('Arial', 'B', 12)
@@ -122,37 +120,34 @@ def generate_pdf_report(info_df, summary_df, criteria_df, validation_df, figures
         validation_widths = [25, 20, 25, 25, 25, 25, 25]
         pdf.dataframe_to_table(validation_df, col_widths=validation_widths)
 
-    # --- Generate PDF output ---
     return pdf.output(dest='S').encode('latin-1')
 
 
 # --- Analysis Functions ---
-def calculate_summary_stats(df, compound, group_by_cols):
+def calculate_summary_stats(df, compound):
     """
-    Calculates and returns summary statistics for a given compound.
+    Calculates and returns summary statistics for a given compound, grouped by Level.
     """
     df[compound] = pd.to_numeric(df[compound], errors='coerce')
-    df = df.dropna(subset=[compound])
+    df_clean = df.dropna(subset=[compound, 'Level'])
+    df_clean['Level'] = pd.to_numeric(df_clean['Level'])
 
-    if df.empty:
+    if df_clean.empty:
         return pd.DataFrame()
 
-    summary = df.groupby(group_by_cols).agg(
-        Mean=(compound, 'mean'),
-        SD=(compound, 'std'),
-        Min=(compound, 'min'),
-        Max=(compound, 'max'),
-        N=(compound, 'count')
+    summary = df_clean.groupby('Level').agg(
+        Mean=(compound, 'mean'), SD=(compound, 'std'),
+        Min=(compound, 'min'), Max=(compound, 'max'), N=(compound, 'count')
     ).reset_index()
 
-    summary['%RSD'] = 100 * (summary['SD'] / summary['Mean']).replace([float('inf'), -float('inf')], None)
-    summary['Mean % Recovery'] = 100 * (summary['Mean'] / summary['Level']).replace([float('inf'), -float('inf')], None)
+    summary['%RSD'] = 100 * (summary['SD'] / summary['Mean']).replace([np.inf, -np.inf], None)
+    summary['Mean % Recovery'] = 100 * (summary['Mean'] / summary['Level']).replace([np.inf, -np.inf], None)
     
     bias_sq = (summary['Mean'] - summary['Level'])**2
     sd_sq = summary['SD']**2
     summary['Uexp (k=2)'] = 2 * np.sqrt(sd_sq + bias_sq)
-    summary['%Uexp (k=2)'] = (100 * (summary['Uexp (k=2)'] / summary['Level'])).replace([float('inf'), -float('inf')], None)
-
+    summary['%Uexp (k=2)'] = (100 * (summary['Uexp (k=2)'] / summary['Level'])).replace([np.inf, -np.inf], None)
+    
     return summary
 
 def create_level_specific_boxplot(df_level, compounds, level_value):
@@ -169,7 +164,7 @@ def create_level_specific_boxplot(df_level, compounds, level_value):
     long_df['Measurement'] = pd.to_numeric(long_df['Measurement'], errors='coerce')
     long_df['Level'] = pd.to_numeric(long_df['Level'], errors='coerce')
     long_df = long_df.dropna(subset=['Measurement', 'Level'])
-    long_df['% Recovery'] = 100 * (long_df['Measurement'] / long_df['Level']).replace([float('inf'), -float('inf')], None)
+    long_df['% Recovery'] = 100 * (long_df['Measurement'] / long_df['Level']).replace([np.inf, -np.inf], None)
     long_df = long_df.dropna(subset=['% Recovery'])
     
     if long_df.empty: return None
@@ -190,19 +185,15 @@ def generate_validation_report(summary_df, criteria_lookup):
     report_df = summary_df[['Compound', 'Level']].copy()
 
     def check(row, criterion_key, value_col):
-        """Helper function to apply a single validation check."""
-        # New lookup logic using a tuple key: (Compound, Level, Criterion)
         limit = criteria_lookup.get((row['Compound'], row['Level'], criterion_key))
         value = row[value_col]
         
-        if limit is None or pd.isna(limit):
-            return "N/A" # No criterion defined for this compound/level/check
-        if pd.isna(value):
-            return "FAIL" # A value should exist if a criterion does
+        if limit is None or pd.isna(limit): return "N/A"
+        if pd.isna(value): return "FAIL"
 
         if 'min' in criterion_key.lower():
             return "PASS" if value >= limit else "FAIL"
-        else: # Assumes a 'max' check
+        else:
             return "PASS" if value <= limit else "FAIL"
 
     report_df['RSD Check'] = summary_df.apply(check, axis=1, criterion_key='%RSD max', value_col='%RSD')
@@ -212,11 +203,9 @@ def generate_validation_report(summary_df, criteria_lookup):
 
     check_cols = [col for col in report_df.columns if 'Check' in col]
     report_df['Overall Status'] = report_df.apply(lambda row: "FAIL" if "FAIL" in row[check_cols].values else "PASS", axis=1)
-
     return report_df
 
 def style_report(val):
-    """Applies color to PASS/FAIL/N/A cells."""
     color = {'PASS': 'green', 'FAIL': 'red'}.get(val, 'grey')
     return f'color: {color}; font-weight: bold;'
 
@@ -239,39 +228,35 @@ if uploaded_file is not None:
             info_df = pd.read_excel(uploaded_file, sheet_name="Info", header=None).dropna(how='all')
         except Exception: st.warning("Optional 'Info' sheet not found.")
         try:
-            # New logic to handle criteria per compound AND per level
-            criteria_df = pd.read_excel(uploaded_file, sheet_name="Criteria", header=0)
-            criteria_df = criteria_df.dropna(how='all').reset_index(drop=True)
-
-            # Ensure the first two columns ('Criterion', 'Level') exist
+            criteria_df_raw = pd.read_excel(uploaded_file, sheet_name="Criteria", header=0)
+            criteria_df = criteria_df_raw.dropna(how='all').reset_index(drop=True)
+            
             if len(criteria_df.columns) >= 2:
-                # Rename first two columns for consistency
                 criteria_df.rename(columns={
                     criteria_df.columns[0]: 'Criterion',
                     criteria_df.columns[1]: 'Level'
                 }, inplace=True)
                 
-                # Ensure 'Level' is numeric to match the summary table data type
+                # --- Data Cleaning and Standardization ---
+                criteria_df['Criterion'] = criteria_df['Criterion'].str.strip()
                 criteria_df['Level'] = pd.to_numeric(criteria_df['Level'], errors='coerce')
                 criteria_df.dropna(subset=['Level'], inplace=True)
 
-                # Melt the dataframe to a long format for easy lookup
                 melted_criteria = criteria_df.melt(
-                    id_vars=['Criterion', 'Level'], 
-                    var_name='Compound', 
-                    value_name='Value'
+                    id_vars=['Criterion', 'Level'], var_name='Compound', value_name='Value'
                 ).dropna(subset=['Value'])
+                
+                melted_criteria['Compound'] = melted_criteria['Compound'].str.strip()
+                melted_criteria['Value'] = pd.to_numeric(melted_criteria['Value'], errors='coerce')
 
-                # Create a lookup Series with a MultiIndex (Compound, Level, Criterion)
-                criteria_lookup = melted_criteria.set_index(['Compound', 'Level', 'Criterion'])['Value']
+                criteria_lookup = melted_criteria.set_index(['Compound', 'Level', 'Criterion'])['Value'].to_dict()
                 
                 st.sidebar.success("Successfully loaded 'Criteria' sheet.")
             else:
-                st.sidebar.warning("'Criteria' sheet is improperly formatted. Must have 'Criterion', 'Level', and at least one compound column.")
+                st.sidebar.warning("'Criteria' sheet is improperly formatted.")
                 criteria_df = None
-                
         except Exception as e: 
-            st.sidebar.warning(f"Could not process 'Criteria' sheet: {e}. Validation Evaluation will not be generated.")
+            st.sidebar.warning(f"Could not process 'Criteria' sheet: {e}.")
             criteria_lookup = None
             criteria_df = None
 
@@ -288,8 +273,12 @@ if uploaded_file is not None:
             st.error(f"Error: Missing required columns: **{', '.join(missing_cols)}**")
         else:
             df.rename(columns=rename_map, inplace=True)
+            df['Level'] = pd.to_numeric(df['Level'], errors='coerce') # Standardize Level type
             notes_index = df.columns.get_loc("Notes")
-            compound_columns = df.columns[notes_index + 1:].tolist()
+            compound_columns_raw = df.columns[notes_index + 1:].tolist()
+            compound_columns = [c.strip() for c in compound_columns_raw] # Clean compound names
+            df.columns = list(df.columns[:notes_index+1]) + compound_columns # Apply cleaned names
+
             if not compound_columns:
                 st.warning("No compound data columns found after the 'Notes' column.")
             else:
@@ -305,18 +294,16 @@ if uploaded_file is not None:
                 if not selected_compounds:
                     st.info("Please select at least one compound to start.")
                 else:
-                    # --- Display Info Sheet ---
                     if info_df is not None and not info_df.empty:
                         st.subheader("Project Information")
                         st.table(info_df.rename(columns={0: "Property", 1: "Value"}))
                         st.markdown("---")
 
-                    # --- 1. Summary Results Section ---
                     st.header("Summary Results")
                     with st.expander("View Summary Statistics", expanded=True):
-                        all_summaries, group_by_cols = [], ['Level']
+                        all_summaries = []
                         for compound in selected_compounds:
-                            summary_df = calculate_summary_stats(df, compound, group_by_cols)
+                            summary_df = calculate_summary_stats(df, compound)
                             if not summary_df.empty:
                                 summary_df['Compound'] = compound
                                 all_summaries.append(summary_df)
@@ -333,18 +320,13 @@ if uploaded_file is not None:
                                 'Uexp (k=2)': '{:.3f}', '%Uexp (k=2)': '{:.2f}%'
                             }), use_container_width=True)
                     
-                    # --- 2. Boxplots Section ---
                     st.header("Comparative Boxplots by Level")
                     plot_df = df.copy()
-                    for compound in selected_compounds:
-                        plot_df[compound] = pd.to_numeric(plot_df[compound], errors='coerce')
-                    plot_df['Level'] = pd.to_numeric(plot_df['Level'], errors='coerce')
-                    plot_df.dropna(subset=['Level'], inplace=True)
                     
-                    if plot_df.empty:
+                    if plot_df.empty or 'Level' not in plot_df or plot_df['Level'].isnull().all():
                         st.warning("No data to generate plots.")
                     else:
-                        unique_levels, figures_list = sorted(plot_df['Level'].unique()), []
+                        unique_levels, figures_list = sorted(plot_df['Level'].dropna().unique()), []
                         for level in unique_levels:
                             df_for_level = plot_df[plot_df['Level'] == level]
                             level_fig = create_level_specific_boxplot(df_for_level, selected_compounds, level)
@@ -352,22 +334,17 @@ if uploaded_file is not None:
                                 st.plotly_chart(level_fig, use_container_width=True)
                                 figures_list.append(level_fig)
                     
-                    # --- 3. Uncertainty Explanation Section ---
                     with st.expander("View Uncertainty Calculation Details"):
                         st.markdown("""
                         The **Expanded Uncertainty (`Uexp`)** provides an interval where the true value is believed to lie with a 95% confidence level.
                         - The calculation is based on the **NORDTEST TR 537** methodology.
-                        - It combines random effects (precision) and systematic effects (bias).
                         - **Calculation**: `Uexp = 2 * sqrt(SD² + Bias²)`, where `Bias = Mean - Level`.
-                        - **%Uexp** expresses this uncertainty as a percentage of the concentration level.
                         """)
 
-                    # --- 4. Validation Evaluation Section ---
-                    if criteria_lookup is not None and 'final_summary_df' in locals():
+                    if criteria_lookup and 'final_summary_df' in locals():
                         st.header("Validation Evaluation")
                         if criteria_df is not None:
                             st.subheader("Applied Validation Criteria")
-                            # Display the full criteria table as it appears in the Excel file
                             st.dataframe(criteria_df)
                         
                         validation_report = generate_validation_report(final_summary_df, criteria_lookup)
@@ -378,7 +355,6 @@ if uploaded_file is not None:
                             use_container_width=True
                         )
 
-                    # --- 5. PDF Export Button ---
                     st.markdown("---")
                     st.header("Export Report")
                     if 'final_summary_df' in locals() and not final_summary_df.empty:
@@ -404,6 +380,4 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.image("AquOmixLogo.png", use_container_width=True)
 st.sidebar.markdown("[https://www.aquomixlab.com](https://www.aquomixlab.com)")
-
-
 
