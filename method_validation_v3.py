@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
+import io
+from openpyxl import Workbook
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -16,9 +18,7 @@ def calculate_summary_stats(df, compound):
     Calculates and returns summary statistics for a given compound, grouped by Level.
     """
     df[compound] = pd.to_numeric(df[compound], errors='coerce')
-    # Use .copy() to avoid SettingWithCopyWarning
     df_clean = df.dropna(subset=[compound, 'Level']).copy()
-    # FIX: Ensure Level is float before grouping to match criteria lookup
     df_clean['Level'] = pd.to_numeric(df_clean['Level']).astype(float)
 
     if df_clean.empty:
@@ -74,7 +74,6 @@ def generate_validation_report(summary_df, criteria_lookup):
     report_df = summary_df[['Compound', 'Level']].copy()
 
     def check(row, criterion_key, value_col):
-        # The lookup key is a tuple: (Compound Name, Level Number, Criterion Name)
         lookup_key = (row['Compound'], row['Level'], criterion_key)
         limit = criteria_lookup.get(lookup_key)
         value = row[value_col]
@@ -99,6 +98,24 @@ def generate_validation_report(summary_df, criteria_lookup):
 def style_report(val):
     color = {'PASS': 'green', 'FAIL': 'red'}.get(val, 'grey')
     return f'color: {color}; font-weight: bold;'
+
+def to_excel(info_df, summary_df, criteria_df, validation_df):
+    """
+    Creates an in-memory Excel file with multiple sheets for the report.
+    """
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        if info_df is not None:
+            info_df.to_excel(writer, sheet_name='Project_Info', index=False)
+        if summary_df is not None:
+            summary_df.to_excel(writer, sheet_name='Summary_Statistics', index=False)
+        if criteria_df is not None:
+            criteria_df.to_excel(writer, sheet_name='Applied_Criteria', index=False)
+        if validation_df is not None:
+            validation_df.to_excel(writer, sheet_name='Validation_Evaluation', index=False)
+    processed_data = output.getvalue()
+    return processed_data
+
 
 # --- Main Application UI ---
 st.title("AquOmixLab - Method Validation Report")
@@ -128,9 +145,7 @@ if uploaded_file is not None:
                     criteria_df.columns[1]: 'Level'
                 }, inplace=True)
                 
-                # --- Data Cleaning and Standardization ---
                 criteria_df['Criterion'] = criteria_df['Criterion'].str.strip()
-                # FIX: Consistently cast Level to float to ensure matching
                 criteria_df['Level'] = pd.to_numeric(criteria_df['Level'], errors='coerce').astype(float)
                 criteria_df.dropna(subset=['Level'], inplace=True)
 
@@ -165,7 +180,6 @@ if uploaded_file is not None:
             st.error(f"Error: Missing required columns: **{', '.join(missing_cols)}**")
         else:
             df.rename(columns=rename_map, inplace=True)
-            # FIX: Consistently cast Level to float to ensure matching
             df['Level'] = pd.to_numeric(df['Level'], errors='coerce').astype(float) 
             notes_index = df.columns.get_loc("Notes")
             compound_columns_raw = df.columns[notes_index + 1:].tolist()
@@ -177,7 +191,6 @@ if uploaded_file is not None:
             else:
                 st.success(f"File uploaded successfully! Found {len(compound_columns)} compound(s).")
                 
-                # --- Sidebar for Compound Selection ---
                 st.sidebar.header("Analysis Options")
                 selected_compounds = st.sidebar.multiselect(
                     "Select compounds to analyze:",
@@ -233,50 +246,39 @@ if uploaded_file is not None:
                         - **Calculation**: `Uexp = 2 * sqrt(SD² + Bias²)`, where `Bias = Mean - Level`.
                         """)
 
-                    # --- NEW: Debugging section ---
-                    with st.expander("🕵️‍♀️ Click for technical details if PASS/FAIL shows 'N/A'"):
-                        st.markdown("""
-                        This section helps diagnose why criteria might not be matching. The "Lookup Keys" from your summary data must **exactly** match a key from the "Criteria Dictionary". 
-                        Check for:
-                        - **Typos** in Compound or Criterion names.
-                        - **Mismatches in Level numbers** (e.g., `10.0` vs `10.1`).
-                        """)
-                        st.write("**Criteria Dictionary (Sample from 'Criteria' sheet)**")
-                        if criteria_lookup:
-                            st.json({str(k): v for k, v in list(criteria_lookup.items())[:10]}, expanded=False)
-                        else:
-                            st.warning("Criteria lookup dictionary is empty or was not created.")
-
-                        if 'final_summary_df' in locals():
-                            st.write("**Lookup Keys (Sample from 'Validation data')**")
-                            summary_keys_sample = []
-                            possible_criteria = ['%RSD max', 'Mean % Recovery max', 'Mean % Recovery min', '%Uexp (k=2) max']
-                            for index, row in final_summary_df.head().iterrows():
-                                for crit in possible_criteria:
-                                    summary_keys_sample.append( (row['Compound'], row['Level'], crit) )
-                            st.json([str(k) for k in summary_keys_sample])
-
-
                     if criteria_lookup is not None and 'final_summary_df' in locals():
                         st.header("Validation Evaluation")
                         if criteria_df is not None:
                             st.subheader("Applied Validation Criteria")
-                            # Apply formatting to display Level without decimals
                             st.dataframe(criteria_df.style.format({'Level': '{:.0f}'}))
                         
                         validation_report = generate_validation_report(final_summary_df, criteria_lookup)
                         report_subset_cols = [col for col in validation_report.columns if 'Check' in col or 'Status' in col]
                         st.subheader("PASS/FAIL Evaluation")
-                        # Apply formatting to display Level without decimals and apply color styling
                         st.dataframe(
                             validation_report.style.format({'Level': '{:.0f}'}).apply(lambda col: col.map(style_report), subset=report_subset_cols),
                             use_container_width=True
                         )
 
+                    # --- Excel Download Section ---
+                    st.markdown("---")
+                    st.header("Download Report")
+                    
+                    if 'final_summary_df' in locals() and 'validation_report' in locals():
+                        excel_data = to_excel(info_df, final_summary_df, criteria_df, validation_report)
+                        st.download_button(
+                            label="📥 Download Report (Excel)",
+                            data=excel_data,
+                            file_name="validation_report.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    else:
+                        st.info("Process data first to enable the download button.")
+
+
     except Exception as e:
         st.error(f"An error occurred: {e}")
 else:
-    # --- Instructions on the main page ---
     st.subheader("How it Works")
     st.markdown("""
     This application performs a comprehensive analysis of analytical method validation data. Simply upload your Excel file to get started.
@@ -312,7 +314,6 @@ else:
 
 # --- Sidebar Footer ---
 st.sidebar.markdown("---")
-# Use the direct URL to the raw image on GitHub
 st.sidebar.image("https://raw.githubusercontent.com/trikaloudis/method_validation-/main/Aquomixlab%20Logo%20v2.png", use_container_width=True)
 st.sidebar.markdown("[www.aquomixlab.com](https://www.aquomixlab.com)")
 
