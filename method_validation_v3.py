@@ -2,9 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
-from fpdf import FPDF
-import io
-from datetime import datetime
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -12,116 +9,6 @@ st.set_page_config(
     page_icon="🔬",
     layout="wide"
 )
-
-# --- PDF Export Class & Functions ---
-class PDF(FPDF):
-    def header(self):
-        self.set_font('Arial', 'B', 12)
-        self.cell(0, 10, 'AquOmixLab - Method Validation Report', 0, 1, 'C')
-        self.ln(10)
-
-    def footer(self):
-        self.set_y(-15)
-        self.set_font('Arial', 'I', 8)
-        self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
-        
-    def chapter_title(self, title):
-        self.set_font('Arial', 'B', 14)
-        self.cell(0, 10, title, 0, 1, 'L')
-        self.ln(5)
-
-    def dataframe_to_table(self, df, col_widths=None, notes=None):
-        self.set_font('Arial', 'B', 9)
-        # Header
-        if col_widths is None:
-            col_widths = [30] * len(df.columns)
-
-        for i, col in enumerate(df.columns):
-            # Sanitize text for PDF font compatibility
-            clean_col = str(col).replace('μ', 'u')
-            self.cell(col_widths[i], 7, clean_col, 1, 0, 'C')
-        self.ln()
-        # Data
-        self.set_font('Arial', '', 9)
-        for index, row in df.iterrows():
-            for i, item in enumerate(row):
-                # Sanitize text for PDF font compatibility
-                clean_item = str(item).replace('μ', 'u')
-                self.cell(col_widths[i], 6, clean_item, 1, 0, 'L')
-            self.ln()
-        if notes:
-            self.set_font('Arial', 'I', 8)
-            # Sanitize text for PDF font compatibility
-            clean_notes = str(notes).replace('μ', 'u')
-            self.multi_cell(0, 5, clean_notes)
-
-
-def generate_pdf_report(info_df, summary_df, criteria_df, validation_df, figures):
-    """
-    Generates a complete PDF report from the analysis results.
-    """
-    pdf = PDF()
-    pdf.add_page()
-
-    # --- 1. Info Section ---
-    if info_df is not None and not info_df.empty:
-        pdf.chapter_title('1. Project Information')
-        pdf.set_font('Arial', '', 10)
-        for index, row in info_df.iterrows():
-            pdf.set_font('Arial', 'B', 10)
-            pdf.cell(80, 6, str(row[0]).replace('μ', 'u'), 0, 0, 'L')
-            pdf.set_font('Arial', '', 10)
-            pdf.cell(0, 6, str(row[1]).replace('μ', 'u'), 0, 1, 'L')
-        pdf.ln(10)
-
-    # --- 2. Summary Statistics ---
-    pdf.chapter_title('2. Summary Statistics')
-    summary_widths = [25, 15, 18, 18, 18, 18, 10, 18, 24, 24, 24]
-    pdf.dataframe_to_table(summary_df, col_widths=summary_widths)
-    pdf.ln(10)
-    
-    # --- 3. Boxplots ---
-    pdf.add_page()
-    pdf.chapter_title('3. Comparative Boxplots by Level')
-    for i, fig in enumerate(figures):
-        if i > 0 and i % 2 == 0: 
-            pdf.add_page()
-        img_bytes = fig.to_image(format="png", width=800, height=500, scale=1)
-        img_stream = io.BytesIO(img_bytes)
-        pdf.image(img_stream, x=10, w=190)
-        pdf.ln(5)
-
-    # --- 4. Validation Criteria & Evaluation ---
-    pdf.add_page()
-    pdf.chapter_title('4. Validation Evaluation')
-    if criteria_df is not None and not criteria_df.empty:
-        pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, "Applied Validation Criteria", 0, 1, 'L')
-        
-        criteria_df_for_pdf = criteria_df.copy()
-        # Sanitize column names for PDF generation
-        criteria_df_for_pdf.columns = [str(col) for col in criteria_df_for_pdf.columns]
-        
-        num_cols = len(criteria_df_for_pdf.columns)
-        if num_cols >= 2:
-            first_col_width = 50
-            second_col_width = 20
-            other_col_width = (190 - first_col_width - second_col_width) / (num_cols - 2) if num_cols > 2 else 120
-            criteria_widths = [first_col_width, second_col_width] + [other_col_width] * (num_cols - 2)
-        else:
-            criteria_widths = [190]
-        
-        pdf.dataframe_to_table(criteria_df_for_pdf, col_widths=criteria_widths)
-        pdf.ln(5)
-
-    if validation_df is not None and not validation_df.empty:
-        pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, "PASS/FAIL Evaluation", 0, 1, 'L')
-        validation_widths = [25, 20, 25, 25, 25, 25, 25]
-        pdf.dataframe_to_table(validation_df, col_widths=validation_widths)
-
-    return pdf.output(dest='S').encode('latin-1')
-
 
 # --- Analysis Functions ---
 def calculate_summary_stats(df, compound):
@@ -332,13 +219,12 @@ if uploaded_file is not None:
                     if plot_df.empty or 'Level' not in plot_df or plot_df['Level'].isnull().all():
                         st.warning("No data to generate plots.")
                     else:
-                        unique_levels, figures_list = sorted(plot_df['Level'].dropna().unique()), []
+                        unique_levels = sorted(plot_df['Level'].dropna().unique())
                         for level in unique_levels:
                             df_for_level = plot_df[plot_df['Level'] == level]
                             level_fig = create_level_specific_boxplot(df_for_level, selected_compounds, level)
                             if level_fig:
                                 st.plotly_chart(level_fig, use_container_width=True)
-                                figures_list.append(level_fig)
                     
                     with st.expander("View Uncertainty Calculation Details"):
                         st.markdown("""
@@ -385,22 +271,6 @@ if uploaded_file is not None:
                             use_container_width=True
                         )
 
-                    st.markdown("---")
-                    st.header("Export Report")
-                    if 'final_summary_df' in locals() and not final_summary_df.empty:
-                        pdf_bytes = generate_pdf_report(
-                            info_df, 
-                            final_summary_df.round(3), 
-                            criteria_df, 
-                            validation_report, 
-                            figures_list
-                        )
-                        st.download_button(
-                           label="📥 Download Full Report (PDF)",
-                           data=pdf_bytes,
-                           file_name=f"Validation_Report_{datetime.now().strftime('%Y-%m-%d')}.pdf",
-                           mime="application/pdf"
-                        )
     except Exception as e:
         st.error(f"An error occurred: {e}")
 else:
