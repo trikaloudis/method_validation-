@@ -292,7 +292,7 @@ if uploaded_file is not None:
                 
                 # --- Sidebar for Compound Selection ---
                 st.sidebar.header("Analysis Options")
-                selected_compounds = st.sidebar.multoselect(
+                selected_compounds = st.sidebar.multiselect(
                     "Select compounds to analyze:",
                     options=compound_columns, default=compound_columns
                 )
