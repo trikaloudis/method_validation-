@@ -341,7 +341,7 @@ if uploaded_file is not None:
                         - **Calculation**: `Uexp = 2 * sqrt(SD² + Bias²)`, where `Bias = Mean - Level`.
                         """)
 
-                    if criteria_lookup and 'final_summary_df' in locals():
+                    if criteria_lookup is not None and 'final_summary_df' in locals():
                         st.header("Validation Evaluation")
                         if criteria_df is not None:
                             st.subheader("Applied Validation Criteria")
@@ -380,4 +380,5 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.image("AquOmixLogo.png", use_container_width=True)
 st.sidebar.markdown("[https://www.aquomixlab.com](https://www.aquomixlab.com)")
+
 
