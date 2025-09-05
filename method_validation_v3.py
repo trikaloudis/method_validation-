@@ -261,13 +261,15 @@ if uploaded_file is not None:
                         st.header("Validation Evaluation")
                         if criteria_df is not None:
                             st.subheader("Applied Validation Criteria")
-                            st.dataframe(criteria_df)
+                            # Apply formatting to display Level without decimals
+                            st.dataframe(criteria_df.style.format({'Level': '{:.0f}'}))
                         
                         validation_report = generate_validation_report(final_summary_df, criteria_lookup)
                         report_subset_cols = [col for col in validation_report.columns if 'Check' in col or 'Status' in col]
                         st.subheader("PASS/FAIL Evaluation")
+                        # Apply formatting to display Level without decimals and apply color styling
                         st.dataframe(
-                            validation_report.style.apply(lambda col: col.map(style_report), subset=report_subset_cols),
+                            validation_report.style.format({'Level': '{:.0f}'}).apply(lambda col: col.map(style_report), subset=report_subset_cols),
                             use_container_width=True
                         )
 
