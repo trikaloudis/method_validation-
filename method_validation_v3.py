@@ -280,6 +280,7 @@ else:
 
 # --- Sidebar Footer ---
 st.sidebar.markdown("---")
-st.sidebar.image("AquOmixLogo.png", use_container_width=True)
-st.sidebar.markdown("[https://www.aquomixlab.com](https://www.aquomixlab.com)")
+# Use the direct URL to the raw image on GitHub
+st.sidebar.image("https://raw.githubusercontent.com/trikaloudis/method_validation-/main/Aquomixlab%20Logo%20v2.png", use_container_width=True)
+st.sidebar.markdown("[www.aquomixlab.com](https://www.aquomixlab.com)")
 
