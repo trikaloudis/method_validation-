@@ -129,8 +129,10 @@ def calculate_summary_stats(df, compound):
     Calculates and returns summary statistics for a given compound, grouped by Level.
     """
     df[compound] = pd.to_numeric(df[compound], errors='coerce')
-    df_clean = df.dropna(subset=[compound, 'Level'])
-    df_clean['Level'] = pd.to_numeric(df_clean['Level'])
+    # Use .copy() to avoid SettingWithCopyWarning
+    df_clean = df.dropna(subset=[compound, 'Level']).copy()
+    # FIX: Ensure Level is float before grouping to match criteria lookup
+    df_clean['Level'] = pd.to_numeric(df_clean['Level']).astype(float)
 
     if df_clean.empty:
         return pd.DataFrame()
@@ -185,7 +187,9 @@ def generate_validation_report(summary_df, criteria_lookup):
     report_df = summary_df[['Compound', 'Level']].copy()
 
     def check(row, criterion_key, value_col):
-        limit = criteria_lookup.get((row['Compound'], row['Level'], criterion_key))
+        # The lookup key is a tuple: (Compound Name, Level Number, Criterion Name)
+        lookup_key = (row['Compound'], row['Level'], criterion_key)
+        limit = criteria_lookup.get(lookup_key)
         value = row[value_col]
         
         if limit is None or pd.isna(limit): return "N/A"
@@ -223,7 +227,7 @@ if uploaded_file is not None:
         # --- Data Loading ---
         df = pd.read_excel(uploaded_file, sheet_name="Validation data")
         
-        info_df, criteria_df, criteria_lookup = None, None, None
+        info_df, criteria_df, criteria_lookup = None, None, {}
         try:
             info_df = pd.read_excel(uploaded_file, sheet_name="Info", header=None).dropna(how='all')
         except Exception: st.warning("Optional 'Info' sheet not found.")
@@ -239,7 +243,8 @@ if uploaded_file is not None:
                 
                 # --- Data Cleaning and Standardization ---
                 criteria_df['Criterion'] = criteria_df['Criterion'].str.strip()
-                criteria_df['Level'] = pd.to_numeric(criteria_df['Level'], errors='coerce')
+                # FIX: Consistently cast Level to float to ensure matching
+                criteria_df['Level'] = pd.to_numeric(criteria_df['Level'], errors='coerce').astype(float)
                 criteria_df.dropna(subset=['Level'], inplace=True)
 
                 melted_criteria = criteria_df.melt(
@@ -257,7 +262,7 @@ if uploaded_file is not None:
                 criteria_df = None
         except Exception as e: 
             st.sidebar.warning(f"Could not process 'Criteria' sheet: {e}.")
-            criteria_lookup = None
+            criteria_lookup = {}
             criteria_df = None
 
         # --- Data Validation ---
@@ -273,11 +278,12 @@ if uploaded_file is not None:
             st.error(f"Error: Missing required columns: **{', '.join(missing_cols)}**")
         else:
             df.rename(columns=rename_map, inplace=True)
-            df['Level'] = pd.to_numeric(df['Level'], errors='coerce') # Standardize Level type
+            # FIX: Consistently cast Level to float to ensure matching
+            df['Level'] = pd.to_numeric(df['Level'], errors='coerce').astype(float) 
             notes_index = df.columns.get_loc("Notes")
             compound_columns_raw = df.columns[notes_index + 1:].tolist()
-            compound_columns = [c.strip() for c in compound_columns_raw] # Clean compound names
-            df.columns = list(df.columns[:notes_index+1]) + compound_columns # Apply cleaned names
+            compound_columns = [c.strip() for c in compound_columns_raw]
+            df.columns = list(df.columns[:notes_index+1]) + compound_columns
 
             if not compound_columns:
                 st.warning("No compound data columns found after the 'Notes' column.")
@@ -286,7 +292,7 @@ if uploaded_file is not None:
                 
                 # --- Sidebar for Compound Selection ---
                 st.sidebar.header("Analysis Options")
-                selected_compounds = st.sidebar.multiselect(
+                selected_compounds = st.sidebar.multoselect(
                     "Select compounds to analyze:",
                     options=compound_columns, default=compound_columns
                 )
@@ -303,7 +309,7 @@ if uploaded_file is not None:
                     with st.expander("View Summary Statistics", expanded=True):
                         all_summaries = []
                         for compound in selected_compounds:
-                            summary_df = calculate_summary_stats(df, compound)
+                            summary_df = calculate_summary_stats(df.copy(), compound)
                             if not summary_df.empty:
                                 summary_df['Compound'] = compound
                                 all_summaries.append(summary_df)
@@ -340,6 +346,30 @@ if uploaded_file is not None:
                         - The calculation is based on the **NORDTEST TR 537** methodology.
                         - **Calculation**: `Uexp = 2 * sqrt(SD² + Bias²)`, where `Bias = Mean - Level`.
                         """)
+
+                    # --- NEW: Debugging section ---
+                    with st.expander("🕵️‍♀️ Click for technical details if PASS/FAIL shows 'N/A'"):
+                        st.markdown("""
+                        This section helps diagnose why criteria might not be matching. The "Lookup Keys" from your summary data must **exactly** match a key from the "Criteria Dictionary". 
+                        Check for:
+                        - **Typos** in Compound or Criterion names.
+                        - **Mismatches in Level numbers** (e.g., `10.0` vs `10.1`).
+                        """)
+                        st.write("**Criteria Dictionary (Sample from 'Criteria' sheet)**")
+                        if criteria_lookup:
+                            st.json({str(k): v for k, v in list(criteria_lookup.items())[:10]}, expanded=False)
+                        else:
+                            st.warning("Criteria lookup dictionary is empty or was not created.")
+
+                        if 'final_summary_df' in locals():
+                            st.write("**Lookup Keys (Sample from 'Validation data')**")
+                            summary_keys_sample = []
+                            possible_criteria = ['%RSD max', 'Mean % Recovery max', 'Mean % Recovery min', '%Uexp (k=2) max']
+                            for index, row in final_summary_df.head().iterrows():
+                                for crit in possible_criteria:
+                                    summary_keys_sample.append( (row['Compound'], row['Level'], crit) )
+                            st.json([str(k) for k in summary_keys_sample])
+
 
                     if criteria_lookup is not None and 'final_summary_df' in locals():
                         st.header("Validation Evaluation")
@@ -380,5 +410,4 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.image("AquOmixLogo.png", use_container_width=True)
 st.sidebar.markdown("[https://www.aquomixlab.com](https://www.aquomixlab.com)")
-
 
