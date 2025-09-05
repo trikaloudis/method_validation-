@@ -1,6 +1,6 @@
-streamlit
-pandas
-plotly
-openpyxl
-fpdf2
-kaleido
+streamlit>=1.30.0
+pandas>=2.0.0
+plotly>=5.15.0
+fpdf2>=2.7.0
+kaleido>=0.2.1
+openpyxl>=3.1.0
