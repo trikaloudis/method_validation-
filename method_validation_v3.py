@@ -276,7 +276,39 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"An error occurred: {e}")
 else:
-    st.info("Awaiting for an Excel file to be uploaded.")
+    # --- Instructions on the main page ---
+    st.subheader("How it Works")
+    st.markdown("""
+    This application performs a comprehensive analysis of analytical method validation data. Simply upload your Excel file to get started.
+    
+    **App Features:**
+    - **Summary Statistics:** Calculates key metrics like Mean, Standard Deviation (SD), %RSD, and Min/Max values for each compound at each concentration level.
+    - **Recovery & Uncertainty:** Computes Mean % Recovery and Expanded Uncertainty (`%Uexp`) based on the NORDTEST TR 537 methodology.
+    - **Automated Evaluation:** Compares your results against predefined validation criteria to generate an automated PASS/FAIL report.
+    - **Interactive Visualizations:** Generates comparative boxplots to visualize the % Recovery distribution for your compounds.
+    """)
+
+    st.subheader("Excel File Structure Requirements")
+    st.markdown("""
+    For the app to work correctly, your Excel file must contain the following sheets with the specified structure:
+    
+    1.  **`Info` Sheet (Optional):**
+        - Contains general project information.
+        - **Column A:** Property name (e.g., "Project Name", "Method ID").
+        - **Column B:** Corresponding value.
+
+    2.  **`Validation data` Sheet (Required):**
+        - Contains the raw measurement data.
+        - **Columns A-G:** `Index`, `Date`, `Analyst`, `Sample`, `Units`, `Level`, `Notes`.
+        - **Column H onwards:** Measurement data for each compound. The compound name must be in the first row (the header).
+
+    3.  **`Criteria` Sheet (Optional):**
+        - Defines the PASS/FAIL criteria for the validation evaluation.
+        - **Column A:** The criterion name (must be one of `'%RSD max'`, `'Mean % Recovery max'`, `'Mean % Recovery min'`, `'%Uexp (k=2) max'`).
+        - **Column B:** The concentration `Level` the criterion applies to.
+        - **Column C onwards:** The criterion value for each compound. The compound name must be in the header.
+    """)
+    st.info("Please upload your Excel file above to begin the analysis.")
 
 # --- Sidebar Footer ---
 st.sidebar.markdown("---")
