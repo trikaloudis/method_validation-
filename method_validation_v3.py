@@ -100,19 +100,19 @@ def generate_pdf_report(info_df, summary_df, criteria_df, validation_df, figures
     pdf.chapter_title('4. Validation Evaluation')
     if criteria_df is not None and not criteria_df.empty:
         pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, "Applied Validation Criteria", 0, 1, 'L')
+        # Total width of page is ~190. 
+        # First column (Criterion) can be wider. Second (Level) is narrow.
+        if num_cols >= 2:
+            first_col_width = 50  # Criterion
+            second_col_width = 20 # Level
+            other_col_width = (190 - first_col_width - second_col_width) / (num_cols - 2) if num_cols > 2 else 120
+            criteria_widths = [first_col_width, second_col_width] + [other_col_width] * (num_cols - 2)
+        elif num_cols == 1:
+            criteria_widths = [190]
+        else:
+            criteria_widths = []
         
-        # Reset index to make the criterion name a column for the table function
-        criteria_df_for_pdf = criteria_df.reset_index()
-        
-        # Dynamic column widths for multi-compound criteria table
-        num_cols = len(criteria_df_for_pdf.columns)
-        # Total width of page is ~190. First column can be wider.
-        first_col_width = 60
-        other_col_width = (190 - first_col_width) / (num_cols - 1) if num_cols > 1 else 130
-        criteria_widths = [first_col_width] + [other_col_width] * (num_cols - 1)
-        
-        pdf.dataframe_to_table(criteria_df_for_pdf, col_widths=criteria_widths)
+        pdf.dataframe_to_table(criteria_df, col_widths=criteria_widths)
         pdf.ln(5)
 
 
@@ -183,20 +183,20 @@ def create_level_specific_boxplot(df_level, compounds, level_value):
     fig.update_layout(boxgroupgap=0.5, boxgap=0.3)
     return fig
 
-def generate_validation_report(summary_df, criteria_dict):
+def generate_validation_report(summary_df, criteria_lookup):
     """
-    Compares summary statistics against compound-specific validation criteria.
+    Compares summary statistics against compound-and-level-specific validation criteria.
     """
     report_df = summary_df[['Compound', 'Level']].copy()
 
     def check(row, criterion_key, value_col):
         """Helper function to apply a single validation check."""
-        compound_criteria = criteria_dict.get(row['Compound'], {})
-        limit = compound_criteria.get(criterion_key)
+        # New lookup logic using a tuple key: (Compound, Level, Criterion)
+        limit = criteria_lookup.get((row['Compound'], row['Level'], criterion_key))
         value = row[value_col]
         
         if limit is None or pd.isna(limit):
-            return "N/A" # No criterion defined for this compound/check
+            return "N/A" # No criterion defined for this compound/level/check
         if pd.isna(value):
             return "FAIL" # A value should exist if a criterion does
 
@@ -234,20 +234,46 @@ if uploaded_file is not None:
         # --- Data Loading ---
         df = pd.read_excel(uploaded_file, sheet_name="Validation data")
         
-        info_df, criteria_df, criteria_dict = None, None, None
+        info_df, criteria_df, criteria_lookup = None, None, None
         try:
             info_df = pd.read_excel(uploaded_file, sheet_name="Info", header=None).dropna(how='all')
         except Exception: st.warning("Optional 'Info' sheet not found.")
         try:
-            # Read with the first row as header and first column as index for multi-compound criteria
-            criteria_df = pd.read_excel(uploaded_file, sheet_name="Criteria", header=0, index_col=0)
-            criteria_df = criteria_df.dropna(how='all')
-            criteria_df.index = criteria_df.index.str.strip()
-            # Convert to a dictionary of dictionaries: {'CompoundA': {'Criterion1': Value1, ...}}
-            criteria_dict = criteria_df.to_dict()
-            st.sidebar.success("Successfully loaded 'Criteria' sheet.")
-        except Exception: 
-            st.sidebar.warning("Optional 'Criteria' sheet not found or improperly formatted. Validation Evaluation will not be generated.")
+            # New logic to handle criteria per compound AND per level
+            criteria_df = pd.read_excel(uploaded_file, sheet_name="Criteria", header=0)
+            criteria_df = criteria_df.dropna(how='all').reset_index(drop=True)
+
+            # Ensure the first two columns ('Criterion', 'Level') exist
+            if len(criteria_df.columns) >= 2:
+                # Rename first two columns for consistency
+                criteria_df.rename(columns={
+                    criteria_df.columns[0]: 'Criterion',
+                    criteria_df.columns[1]: 'Level'
+                }, inplace=True)
+                
+                # Ensure 'Level' is numeric to match the summary table data type
+                criteria_df['Level'] = pd.to_numeric(criteria_df['Level'], errors='coerce')
+                criteria_df.dropna(subset=['Level'], inplace=True)
+
+                # Melt the dataframe to a long format for easy lookup
+                melted_criteria = criteria_df.melt(
+                    id_vars=['Criterion', 'Level'], 
+                    var_name='Compound', 
+                    value_name='Value'
+                ).dropna(subset=['Value'])
+
+                # Create a lookup Series with a MultiIndex (Compound, Level, Criterion)
+                criteria_lookup = melted_criteria.set_index(['Compound', 'Level', 'Criterion'])['Value']
+                
+                st.sidebar.success("Successfully loaded 'Criteria' sheet.")
+            else:
+                st.sidebar.warning("'Criteria' sheet is improperly formatted. Must have 'Criterion', 'Level', and at least one compound column.")
+                criteria_df = None
+                
+        except Exception as e: 
+            st.sidebar.warning(f"Could not process 'Criteria' sheet: {e}. Validation Evaluation will not be generated.")
+            criteria_lookup = None
+            criteria_df = None
 
         # --- Data Validation ---
         required_cols = ["Index", "Date", "Analyst", "Sample", "Units", "Level", "Notes"]
@@ -337,14 +363,14 @@ if uploaded_file is not None:
                         """)
 
                     # --- 4. Validation Evaluation Section ---
-                    if criteria_dict and 'final_summary_df' in locals():
+                    if criteria_lookup is not None and 'final_summary_df' in locals():
                         st.header("Validation Evaluation")
                         if criteria_df is not None:
                             st.subheader("Applied Validation Criteria")
-                            # Display the full criteria table (compounds as columns)
+                            # Display the full criteria table as it appears in the Excel file
                             st.dataframe(criteria_df)
                         
-                        validation_report = generate_validation_report(final_summary_df, criteria_dict)
+                        validation_report = generate_validation_report(final_summary_df, criteria_lookup)
                         report_subset_cols = [col for col in validation_report.columns if 'Check' in col or 'Status' in col]
                         st.subheader("PASS/FAIL Evaluation")
                         st.dataframe(
@@ -378,4 +404,6 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.image("AquOmixLogo.png", use_container_width=True)
 st.sidebar.markdown("[https://www.aquomixlab.com](https://www.aquomixlab.com)")
+
+
 
